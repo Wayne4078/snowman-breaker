@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.ait
+tools/.chars.txt
+.DS_Store

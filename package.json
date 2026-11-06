@@ -1,0 +1,21 @@
+{
+  "name": "snowman-breaker",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "font": "python3 tools/subset_font.py",
+    "build": "python3 tools/subset_font.py && vite build",
+    "ait": "npm run build && ait build",
+    "dev": "vite"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@apps-in-toss/web-framework": "^3.10.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
+  },
+  "private": true
+}
