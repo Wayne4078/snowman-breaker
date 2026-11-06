@@ -1112,7 +1112,7 @@ function drawResult(){
 }
 
 // ================= 첫 화면 · 미션 고르기 · 준비 =================
-const TITLE_IMG=new Image();let titleImgOk=false;TITLE_IMG.onload=()=>{titleImgOk=true;};TITLE_IMG.src='art/title.webp';
+const TITLE_IMG=new Image();let titleImgOk=false;TITLE_IMG.onload=()=>{titleImgOk=true;};TITLE_IMG.src='./art/title.webp';
 function headerBar(title,backFn){
   if(backFn){ctx.fillStyle='rgba(255,255,255,.1)';roundRect(ctx,8,8,52,48,14);ctx.fill();txt('‹',33,30,34,'#fff','center');lobbyBtns.push({r:[0,0,70,64],fn:()=>{sfx.click();backFn();}});}
   txt(title,backFn?70:20,32,26,'#fff');
@@ -1129,7 +1129,7 @@ function drawTitle(){
     fullRect('rgba(10,14,35,.08)');
   }
   ctx.save();ctx.font='46px Jua, sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineWidth=10;ctx.strokeStyle='#0d1530';
-  const ty=128+Math.sin(t*2)*3;ctx.strokeText('눈사람',W/2,ty);ctx.fillStyle='#fff';ctx.fillText('눈사람',W/2,ty);
+  const ty=(titleImgOk?62:128)+Math.sin(t*2)*3;ctx.strokeText('눈사람',W/2,ty);ctx.fillStyle='#fff';ctx.fillText('눈사람',W/2,ty);
   ctx.font='52px Jua, sans-serif';ctx.strokeText('브레이커',W/2,ty+54);ctx.fillStyle='#ffd23f';ctx.fillText('브레이커',W/2,ty+54);ctx.restore();
   const r=loadResume();
   if(r){
