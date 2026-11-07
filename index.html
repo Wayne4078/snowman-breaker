@@ -440,6 +440,7 @@ cv.addEventListener('pointerdown',e=>{
   const [x,y]=toLogic(e);
   if(!firstTouch){firstTouch=true;track('first_touch',{since_open_s:Math.round((Date.now()-T0)/1000)});}
   if(paused){hitBtns(pauseBtns,x,y);return;}
+  if(state==='teaser'){ if(t-teaserT>1.5){sfx.click();go('map');} return; }
   if(state==='title'||state==='map'||state==='lobby'){ hitBtns(lobbyBtns,x,y); return; }
   if(inMission()&&inRect(x,y,[0,0,60,60])){openPause('button');return;}
   if(state==='win'||state==='lose'||state==='chance'){ if(t-endT>.5)hitBtns(hudBtns,x,y); return; }
@@ -475,6 +476,7 @@ function handleBack(){
   if(inMission()){openPause('back');return true;}
   if(state==='win'||state==='lose'){go('lobby');return true;}
   if(state==='lobby'){go('map');return true;}
+  if(state==='teaser'){go('map');return true;}
   if(state==='map'){go('title');return true;}
   return false;                                       // 첫 화면 → 닫기
 }
@@ -707,7 +709,7 @@ function spawnBoss(){
 }
 function finishMatch(win){
   state=win?'win':'lose';endT=t;save.chips+=chipsRun;
-  const first=!save.cleared[curMission]&&win;if(win)save.cleared[curMission]=true;persist();clearResume();
+  const first=!save.cleared[curMission]&&win;if(win)save.cleared[curMission]=true;if(first&&curMission===MISSION_DEFS.length-1&&!save.teaserSeen)save.teaserPending=1;persist();clearResume();
   track('match_complete',{mission:curMission+1,result:win?'win':'lose',first_clear:first?1:0,shots_left:shotsLeft,shots_fired:shotsFired,killed:killedTotal,total:totalHP,
     boss_hp_left:bossG?bossG.hp:0,chips:chipsRun,legend:legend?(legend.caught?'caught':legend.fled?'fled':legend.spawned?'missed':'none'):'none',chance_used:chanceUsed?1:0,
     duration_s:Math.round((Date.now()-matchStartT)/1000),match_no:save.plays});
@@ -1006,6 +1008,7 @@ function render(){
   ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(bgCanvas,0,0);
   ctx.setTransform(scale*dpr,0,0,scale*dpr,ox*dpr,oy*dpr);
   if(state==='title'){drawTitle();return;}
+  if(state==='teaser'){drawTeaser();return;}
   if(state==='map'){drawMap();return;}
   if(state==='lobby'){drawLobby();return;}
   ctx.save();
@@ -1108,6 +1111,7 @@ function drawResult(){
   const nextOk=win&&curMission<MISSION_DEFS.length-1;
   bigBtn(b2,nextOk?'다음 미션':'다시 하기','#ffd23f','#3a2a00',21);
   ctx.globalAlpha=1;
+  if(save.teaserPending){hudBtns.push({r:b1,fn:()=>openTeaser('clear')},{r:b2,fn:()=>openTeaser('clear')});return;}
   hudBtns.push({r:b1,fn:()=>{go('lobby');sfx.click();}},{r:b2,fn:()=>{sfx.click();if(nextOk){setMission(curMission+1);go('lobby');}else{track('rematch',{mission:curMission+1});startMission(curMission);}}});
 }
 
@@ -1143,26 +1147,67 @@ function drawTitle(){
       if(!save.plays){setMission(0);startMission(0);}else go('map');}});
   }
 }
+const CH2_IMG=new Image();let ch2ImgOk=false;CH2_IMG.onload=()=>{ch2ImgOk=true;};CH2_IMG.src='./art/ch2.webp';
+function drawCover(img,x,y,w,h,fy=.5){const sc=Math.max(w/img.width,h/img.height),iw=img.width*sc,ih=img.height*sc;ctx.drawImage(img,x+(w-iw)/2,y+(h-ih)*fy,iw,ih);}
 function drawMap(){
   lobbyBtns=[];fullRect('rgba(10,14,35,.78)');
   headerBar(`${CHAPTER} 챕터`,()=>go('title'));
   MISSION_DEFS.forEach((d,i)=>{
-    const y=74+i*104,open=unlocked(i),done=!!save.cleared[i],cur=open&&!done;
-    ctx.fillStyle=!open?'#20253f':cur?'#3f6fc4':'#2a3558';roundRect(ctx,12,y,W-24,94,18);ctx.fill();
-    if(cur){ctx.strokeStyle='#ffd23f';ctx.lineWidth=3;roundRect(ctx,12,y,W-24,94,18);ctx.stroke();}
-    ctx.fillStyle=open?'rgba(255,255,255,.16)':'rgba(255,255,255,.06)';ctx.beginPath();ctx.arc(52,y+47,26,0,7);ctx.fill();
-    txt(String(i+1),52,y+48,28,open?'#fff':'#5c648a','center');
-    txt(d.name,92,y+30,22,open?'#fff':'#6c74a0');
-    txt(open?d.sub:'앞 미션을 깨면 열려요',92,y+58,16,open?'#d4dcff':'#5c648a');
-    if(open)txt(`왕눈사람 체력 ${d.boss}`,92,y+80,14,'#ffe066');
-    if(done){ctx.fillStyle='#ffd23f';star(W-48,y+40,16);txt('클리어',W-48,y+70,14,'#ffe066','center');}
-    else if(!open)txt('🔒',W-48,y+48,24,'#fff','center');
-    else txt('도전!',W-48,y+48,19,'#ffe066','center');
-    if(open)lobbyBtns.push({r:[12,y,W-24,94],fn:()=>{sfx.click();setMission(i);track('mission_select',{mission:i+1,cleared:done?1:0});go('lobby');}});
+    const y=68+i*94,open=unlocked(i),done=!!save.cleared[i],cur=open&&!done;
+    ctx.fillStyle=!open?'#20253f':cur?'#3f6fc4':'#2a3558';roundRect(ctx,12,y,W-24,86,18);ctx.fill();
+    if(cur){ctx.strokeStyle='#ffd23f';ctx.lineWidth=3;roundRect(ctx,12,y,W-24,86,18);ctx.stroke();}
+    ctx.fillStyle=open?'rgba(255,255,255,.16)':'rgba(255,255,255,.06)';ctx.beginPath();ctx.arc(50,y+43,25,0,7);ctx.fill();
+    txt(String(i+1),50,y+44,27,open?'#fff':'#5c648a','center');
+    txt(d.name,88,y+26,21,open?'#fff':'#6c74a0');
+    txt(open?d.sub:'앞 미션을 깨면 열려요',88,y+52,16,open?'#d4dcff':'#5c648a');
+    if(open)txt(`왕눈사람 체력 ${d.boss}`,88,y+74,14,'#ffe066');
+    if(done){ctx.fillStyle='#ffd23f';star(W-48,y+36,16);txt('클리어',W-48,y+66,14,'#ffe066','center');}
+    else if(!open)txt('🔒',W-48,y+44,24,'#fff','center');
+    else txt('도전!',W-48,y+44,19,'#ffe066','center');
+    if(open)lobbyBtns.push({r:[12,y,W-24,86],fn:()=>{sfx.click();setMission(i);track('mission_select',{mission:i+1,cleared:done?1:0});go('lobby');}});
   });
-  const fr=[60,600,W-120,48];txt('만든 사람에게 한마디 ›',W/2,fr[1]+24,18,'#aab3d8','center');lobbyBtns.push({r:fr,fn:()=>openFeedback('map')});
-  txt('다음 동네는 곧 열려요',W/2,670,15,'#6c76a0','center');
+  // 다음 챕터 예고 카드 (잠김)
+  const cy=542,ch=100;
+  ctx.save();roundRect(ctx,12,cy,W-24,ch,18);ctx.clip();
+  ctx.fillStyle='#0b0f24';ctx.fillRect(12,cy,W-24,ch);
+  if(ch2ImgOk)drawCover(CH2_IMG,12,cy,W-24,ch,.32);
+  const gr=ctx.createLinearGradient(12,0,W-12,0);gr.addColorStop(0,'rgba(5,8,22,.88)');gr.addColorStop(.65,'rgba(5,8,22,.35)');gr.addColorStop(1,'rgba(5,8,22,.1)');ctx.fillStyle=gr;ctx.fillRect(12,cy,W-24,ch);
+  // 반짝이는 별 몇 개
+  for(let k=0;k<7;k++){const sx=30+((k*97)%300),sy=cy+12+((k*53)%76),a=.35+.35*Math.sin(t*3+k*1.7);ctx.fillStyle=`rgba(255,255,230,${a})`;star(sx,sy,2.2+((k*3)%3));}
+  ctx.restore();
+  ctx.strokeStyle='rgba(255,226,120,.55)';ctx.lineWidth=2;roundRect(ctx,12,cy,W-24,ch,18);ctx.stroke();
+  txt('2챕터 · 별똥별 언덕',28,cy+30,21,'#fff');
+  txt('쌍둥이 왕눈사람이 내려온다',28,cy+58,16,'#ffe08a');
+  txt('🔒 곧 열려요',28,cy+82,15,'#c7cdf0');
+  lobbyBtns.push({r:[12,cy,W-24,ch],fn:()=>{sfx.click();openTeaser('map');}});
+  const fr=[60,650,W-120,44];txt('만든 사람에게 한마디 ›',W/2,fr[1]+22,18,'#aab3d8','center');lobbyBtns.push({r:fr,fn:()=>openFeedback('map')});
 }
+// 쿠키 영상: 골목 챕터를 다 깨면 다음 무대와 더 센 보스를 살짝 보여 준다
+let teaserT=0;
+function openTeaser(via){teaserT=t;parts=[];save.teaserSeen=1;save.teaserPending=0;persist();go('teaser');sfx.wave();track('teaser_view',{via});}
+function drawTeaser(){
+  const k=t-teaserT;
+  ctx.fillStyle='#000';ctx.fillRect(VL(),VT(),VR()-VL(),VB()-VT());
+  if(ch2ImgOk){ctx.save();ctx.globalAlpha=Math.min(1,k/1.2);const z=1.12-Math.min(.12,k*.02);const w=(VR()-VL())*z,h=(VB()-VT())*z;
+    ctx.translate(W/2,(VT()+VB())/2);drawCover(CH2_IMG,-w/2,-h/2,w,h);ctx.restore();}
+  fullRect(`rgba(0,0,10,${Math.max(.15,.7-k*.25)})`);
+  // 코드로 그린 별똥별 (두 번 지나감)
+  for(const [st,y0] of [[.9,90],[3.6,150]]){const p=(k-st)/1.1;if(p>0&&p<1){const x=-40+p*(W+120),y=y0+p*120;
+    const g=ctx.createLinearGradient(x-120,y-60,x,y);g.addColorStop(0,'rgba(255,255,255,0)');g.addColorStop(1,'rgba(255,250,210,.95)');
+    ctx.strokeStyle=g;ctx.lineWidth=4;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(x-120,y-60);ctx.lineTo(x,y);ctx.stroke();
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x,y,4.5,0,7);ctx.fill();
+    if(Math.random()<.6)parts.push({x,y,vx:(Math.random()-.5)*40,vy:Math.random()*40,g:20,drag:.3,life:.6,col:'#fff6c8',r:2});}}
+  for(const q of parts){ctx.globalAlpha=Math.max(0,q.life);ctx.fillStyle=q.col;ctx.beginPath();ctx.arc(q.x,q.y,q.r||2,0,7);ctx.fill();}ctx.globalAlpha=1;
+  const line=(at,str,y,fs,col)=>{const a=Math.min(1,Math.max(0,(k-at)/.5));if(a<=0)return;ctx.save();ctx.globalAlpha=a;ctx.font=`${fs}px Jua, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineWidth=fs/4;ctx.strokeStyle='rgba(5,8,22,.9)';ctx.strokeText(str,W/2,y+(1-a)*8);ctx.fillStyle=col;ctx.fillText(str,W/2,y+(1-a)*8);ctx.restore();};
+  line(1.0,'오늘 밤, 언덕 위에서…',70,24,'#e8ecff');
+  line(2.4,'쌍둥이 왕눈사람이 온다!',540,32,'#ffd23f');
+  line(3.4,'2챕터 「별똥별 언덕」',590,24,'#fff');
+  line(3.9,'곧 열려요',628,21,'#c7cdf0');
+  if(k>4.2){pill(W/2-100,656,200,34,'rgba(5,8,22,.8)');const a=.6+.4*Math.sin(t*4);ctx.globalAlpha=a;txt('화면을 누르면 돌아가요',W/2,673,16,'#e8ecff','center');ctx.globalAlpha=1;}
+  if(k>2.35&&k<2.45&&!teaserBoom){teaserBoom=1;sfx.legend&&sfx.legend();shake=6;}
+  if(k<2.3)teaserBoom=0;
+}
+let teaserBoom=0;
 function drawLobby(){
   lobbyBtns=[];
   fullRect('rgba(10,14,35,.8)');
