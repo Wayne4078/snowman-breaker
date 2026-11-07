@@ -1,6 +1,6 @@
 // 토스(앱인토스) 연결 — 게임 본체(index.html 인라인 스크립트)는 window.SBToss만 봅니다.
 // 토스 밖(일반 브라우저)에서도 에러 없이 조용히 넘어가야 합니다.
-import { graniteEvent, Analytics, closeView, getOperationalEnvironment } from '@apps-in-toss/web-framework';
+import { graniteEvent, Analytics, closeView, getOperationalEnvironment, loadFullScreenAd, showFullScreenAd } from '@apps-in-toss/web-framework';
 
 let env = 'web';
 try { env = getOperationalEnvironment() || 'web'; } catch (e) { env = 'web'; }
@@ -13,6 +13,33 @@ window.SBToss = {
   },
   close() {
     try { closeView(); } catch (e) {}
+  },
+  adsSupported() {
+    try { return loadFullScreenAd.isSupported() && showFullScreenAd.isSupported(); } catch (e) { return false; }
+  },
+  // 보상형 광고: 불러와서 바로 보여 주고, 끝까지 보면 done(true)
+  showAd(adGroupId, done) {
+    let finished = false, rewarded = false;
+    const end = (ok) => { if (finished) return; finished = true; done(ok); };
+    try {
+      loadFullScreenAd({
+        options: { adGroupId },
+        onEvent: (e) => {
+          if (e.type !== 'loaded') return;
+          showFullScreenAd({
+            options: { adGroupId },
+            onEvent: (ev) => {
+              if (ev.type === 'userEarnedReward') rewarded = true;
+              if (ev.type === 'dismissed') end(rewarded);
+              if (ev.type === 'failedToShow') end(false);
+            },
+            onError: () => end(false),
+          });
+        },
+        onError: () => end(false),
+      });
+    } catch (e) { end(false); }
+    setTimeout(() => end(rewarded), 90000); // 안전장치
   },
 };
 

@@ -28,6 +28,8 @@
 | 이탈 | `pause_open` (via: button/back), `pause_action` (resume/restart/map/title) | |
 | | `match_abandon` | where, shots_left, killed, total, chips |
 | | `app_background` / `app_foreground` / `app_exit` | session_s, in_match / away_s / via |
+| 도전권 | `ticket_spend` (why: lose/quit/restart, left) · `ticket_gain` (why: ad) · `ticket_empty` (mission) | |
+| 광고 | `ad_request` / `ad_reward` / `ad_fail` | slot: ticket / revive |
 | 예고 | `teaser_view` (2챕터 쿠키 영상) | via: clear(5번 첫 클리어) / map(잠긴 카드) |
 | 의견 | `feedback_open` / `feedback_send` / `feedback_close` | via, mood, chip, has_note / why, step |
 

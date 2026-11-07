@@ -160,6 +160,51 @@ let save={chips:0,shotLv:0,ballLv:0,pocketLv:0,bagLv:0,luckLv:0,bait:false,legen
 try{const s2=JSON.parse(localStorage.getItem('snow_save_v2')||'null');if(s2)save=Object.assign(save,s2);}catch(e){}
 function persist(){try{localStorage.setItem('snow_save_v2',JSON.stringify(save));}catch(e){}}
 
+// ================= 도전권(입장권) =================
+// 지면 1장 줄고, 이기면 그대로(캔디크러시식). 30분마다 1장, 최대 5장. 골목 1번을 처음 깨기 전까지는 줄지 않음(첫 손님 보호)
+const TICKET_MAX=5,TICKET_MS=30*60*1000;
+if(save.tickets===undefined){save.tickets=TICKET_MAX;save.ticketAt=Date.now();}
+function tickets(){
+  const now=Date.now();
+  if(save.tickets>=TICKET_MAX){save.ticketAt=now;return save.tickets;}
+  const n=Math.floor((now-save.ticketAt)/TICKET_MS);
+  if(n>0){save.tickets=Math.min(TICKET_MAX,save.tickets+n);save.ticketAt+=n*TICKET_MS;if(save.tickets>=TICKET_MAX)save.ticketAt=now;persist();}
+  return save.tickets;
+}
+function ticketWait(){const ms=Math.max(0,save.ticketAt+TICKET_MS-Date.now()),m=Math.floor(ms/60000),sec=Math.floor(ms/1000)%60;return `${m}:${String(sec).padStart(2,'0')}`;}
+const ticketProtected=()=>!save.cleared[0];
+function spendTicket(why){
+  if(ticketProtected())return false;
+  tickets();if(save.tickets>=TICKET_MAX)save.ticketAt=Date.now();
+  save.tickets=Math.max(0,save.tickets-1);persist();track('ticket_spend',{why,left:save.tickets});return true;
+}
+function addTicket(n,why){tickets();save.tickets=Math.min(TICKET_MAX,save.tickets+n);if(save.tickets>=TICKET_MAX)save.ticketAt=Date.now();persist();track('ticket_gain',{why,left:save.tickets});}
+function drawTickets(cx,cy,big){ // 도전권 아이콘 줄
+  const n=tickets(),sz=big?13:11,gap=big?30:25,x0=cx-gap*(TICKET_MAX-1)/2;
+  for(let i=0;i<TICKET_MAX;i++){const on=i<n,x=x0+i*gap;
+    ctx.fillStyle=on?'#ffffff':'rgba(255,255,255,.18)';ctx.beginPath();ctx.arc(x,cy,sz,0,7);ctx.fill();
+    if(on){ctx.fillStyle='#d6303a';ctx.beginPath();ctx.ellipse(x,cy-sz*.55,sz*.75,sz*.45,0,Math.PI,0);ctx.fill();ctx.fillStyle='rgba(120,150,200,.35)';ctx.beginPath();ctx.arc(x+sz*.25,cy+sz*.25,sz*.5,0,7);ctx.fill();}}
+}
+// ================= 보상형 광고 =================
+// 토스 콘솔 광고 그룹 ID(인앱광고 약관 동의 후 발급). 비어 있으면 토스에선 광고 버튼을 숨기고, 웹 시험판에선 가짜 광고로 흐름만 확인
+const AD_GROUPS={ticket:'',revive:''};
+let adBusy=false,adFake=null;
+function adReady(slot){
+  if(window.SBToss&&window.SBToss.env!=='web')return !!(AD_GROUPS[slot]&&window.SBToss.adsSupported&&window.SBToss.adsSupported());
+  return true; // 웹 시험판: 가짜 광고
+}
+function showRewardAd(slot,onReward){
+  if(adBusy)return;adBusy=true;track('ad_request',{slot});
+  const done=(ok)=>{adBusy=false;adFake=null;if(ok){track('ad_reward',{slot});onReward();}else track('ad_fail',{slot});};
+  if(window.SBToss&&window.SBToss.env!=='web'){window.SBToss.showAd(AD_GROUPS[slot],done);return;}
+  adFake={t0:t,slot,done}; // 웹: 2.5초짜리 가짜 광고
+}
+function drawFakeAd(){
+  if(!adFake)return;const k=t-adFake.t0;
+  fullRect('rgba(0,0,0,.88)');txt('광고 자리 (시험판)',W/2,320,24,'#fff','center');txt(`${Math.max(0,Math.ceil(2.5-k))}초 뒤 보상`,W/2,360,18,'#aab3d8','center');
+  if(k>=2.5){const d=adFake.done;d(true);}
+}
+
 // ================= 분석 이벤트 (game-analytics-funnel) =================
 const T0=Date.now();
 const EV_KEY='sb_events',UID_KEY='sb_uid',FIRST_KEY='sb_first';
@@ -444,6 +489,7 @@ cv.addEventListener('pointerdown',e=>{
   audio();if(!guarded){guarded=true;guardBack();}
   const [x,y]=toLogic(e);
   if(!firstTouch){firstTouch=true;track('first_touch',{since_open_s:Math.round((Date.now()-T0)/1000)});}
+  if(adBusy)return;
   if(paused){hitBtns(pauseBtns,x,y);return;}
   if(state==='teaser'){ if(t-teaserT>1.5){sfx.click();try{CH2_VID.pause();}catch(e){}go('map');} return; }
   if(state==='title'||state==='map'||state==='lobby'){ hitBtns(lobbyBtns,x,y); return; }
@@ -471,7 +517,12 @@ function openPause(via){if(paused||!inMission())return;paused=true;aim=null;sfx.
 function closePause(){paused=false;}
 function quitMission(to){ // 판 중간에 나가기: 모은 구슬은 챙기고, 이어 하기는 지운다
   track('match_abandon',{mission:curMission+1,where:to,shots_left:shotsLeft,killed:killedTotal,total:totalHP,chips:chipsRun});
-  save.chips+=chipsRun;chipsRun=0;persist();clearResume();go(to);
+  save.chips+=chipsRun;chipsRun=0;spendTicket('quit');persist();clearResume();go(to);
+}
+let lastSpent=false,noTicket=false;
+function tryStart(i){ // 도전권이 있어야 시작
+  if(tickets()<=0&&!ticketProtected()){noTicket=true;track('ticket_empty',{mission:i+1});sfx.full();return;}
+  startMission(i);
 }
 let lastBack=0;
 // 뒤로 가기 한 번 = 한 단계. 처리했으면 true, 앱을 닫아도 되면 false
@@ -537,6 +588,7 @@ let launchBowl=false;
 
 // ================= 업데이트 =================
 function update(dt){
+  if(adBusy){if(state==='chance')endT+=dt;}
   if(slowmo>0){slowmo-=dt;dt*=.22;}
   t+=dt;shake*=Math.pow(.001,dt);
   if(banner){banner.t+=dt;if(banner.t>1.6)banner=null;}
@@ -747,7 +799,7 @@ function spawnBoss(){
   banner={txt:groups.some(g=>!g.boss&&!g.legend)?'왕눈사람이 끼어들었다!':'왕눈사람 등장!',t:0,boss:true};sfx.wave();shake=10;
 }
 function finishMatch(win){
-  state=win?'win':'lose';endT=t;save.chips+=chipsRun;
+  state=win?'win':'lose';endT=t;save.chips+=chipsRun;lastSpent=win?false:spendTicket('lose');
   const first=!save.cleared[curMission]&&win;if(win)save.cleared[curMission]=true;if(first&&curMission===CH1_COUNT-1&&!save.teaserSeen)save.teaserPending=1;persist();clearResume();
   track('match_complete',{mission:curMission+1,result:win?'win':'lose',first_clear:first?1:0,shots_left:shotsLeft,shots_fired:shotsFired,killed:killedTotal,total:totalHP,
     boss_hp_left:bossG?bossG.hp:0,chips:chipsRun,legend:legend?(legend.caught?'caught':legend.fled?'fled':legend.spawned?'missed':'none'):'none',chance_used:chanceUsed?1:0,
@@ -1047,7 +1099,7 @@ function drawPause(){
   txt('잠깐 쉬기',W/2,182,30,'#fff','center');
   txt(`${MISSION.name} · 남은 샷 ${shotsLeft}`,W/2,216,17,'#aab3d8','center');
   const B=[['계속하기','#ffd23f','#3a2a00',()=>{closePause();sfx.click();track('pause_action',{action:'resume'});}],
-           ['이 판 처음부터','#3f6fc4','#fff',()=>{track('pause_action',{action:'restart'});save.chips+=chipsRun;chipsRun=0;persist();clearResume();startMission(curMission);}],
+           ['이 판 처음부터','#3f6fc4','#fff',()=>{track('pause_action',{action:'restart'});save.chips+=chipsRun;chipsRun=0;spendTicket('restart');persist();clearResume();paused=false;go('lobby');tryStart(curMission);}],
            ['미션 고르는 화면으로','#3b4270','#fff',()=>{track('pause_action',{action:'map'});quitMission('map');}],
            ['첫 화면으로','#3b4270','#fff',()=>{track('pause_action',{action:'title'});quitMission('title');}]];
   B.forEach(([l,c,tc,fn],i)=>{const r=[44,240+i*68,W-88,58];bigBtn(r,l,c,tc,i===0?24:21);pauseBtns.push({r,fn});});
@@ -1058,10 +1110,10 @@ function render(){
   if(!bgCanvas)buildBG();
   ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(bgCanvas,0,0);
   ctx.setTransform(scale*dpr,0,0,scale*dpr,ox*dpr,oy*dpr);
-  if(state==='title'){drawTitle();return;}
+  if(state==='title'){drawTitle();drawFakeAd();return;}
   if(state==='teaser'){drawTeaser();return;}
   if(state==='map'){drawMap();return;}
-  if(state==='lobby'){drawLobby();return;}
+  if(state==='lobby'){drawLobby();drawFakeAd();return;}
   ctx.save();
   if(shake>.3)ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);
   for(const o of orbs){const s=1+Math.sin(o.ph*5)*.1;ctx.save();ctx.translate(o.x,o.y+Math.sin(o.ph*3)*3);ctx.scale(s,s);
@@ -1116,6 +1168,7 @@ function render(){
   if(state==='win'||state==='lose')drawResult();
   if(inMission())drawMenuBtn();
   if(paused)drawPause();
+  drawFakeAd();
 }
 function drawSnowfall(){ctx.fillStyle='rgba(255,255,255,.85)';for(let i=0;i<40;i++){const sx=(i*97.3+Math.sin(t*.6+i)*14+t*8*(1+i%3))%W,sy=FIELD_TOP+((i*53.7+t*(22+i%5*6))%(FLOOR-FIELD_TOP));ctx.beginPath();ctx.arc((sx+W)%W,sy,1+(i%3)*.6,0,7);ctx.fill();}}
 function star(x,y,r){ctx.beginPath();for(let i=0;i<8;i++){const a=i*Math.PI/4,rr=i%2?r*.3:r;ctx.lineTo(x+Math.cos(a)*rr,y+Math.sin(a)*rr);}ctx.closePath();ctx.fill();}
@@ -1132,14 +1185,20 @@ function drawChance(){
   ctx.strokeStyle='#ffd23f';ctx.lineWidth=6;ctx.beginPath();ctx.arc(W/2,304,40,-Math.PI/2,-Math.PI/2+Math.PI*2*left/10);ctx.stroke();
   txt(Math.ceil(left),W/2,305,36,'#fff','center');
   const fb=[40,372,132,62],cb=[W-172,372,132,62];
-  bigBtn(fb,'무료로 부활','#2f8cff','#fff',20);
+  const reviveAd=window.SBToss&&window.SBToss.env!=='web';const reviveOk=!reviveAd||adReady('revive');
+  if(reviveOk)bigBtn(fb,reviveAd?'광고 보고 부활':'무료로 부활','#2f8cff','#fff',reviveAd?18:20);
   ctx.fillStyle=save.chips>=3?'#ffd23f':'#5a5f80';roundRect(ctx,cb[0],cb[1],cb[2],cb[3],16);ctx.fill();drawChip(cb[0]+34,cb[1]+31,11);txt('×3',cb[0]+84,cb[1]+32,21,save.chips>=3?'#3a2a00':'#c7cdf0','center');
   txt('부활은 판마다 한 번',W/2,448,15,'#8a93c0','center');
   ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(W-44,186,20,0,7);ctx.fill();txt('✕',W-44,187,20,'#2a3558','center');
   ctx.restore();
-  hudBtns.push({r:fb,fn:()=>useChance('cocoa')});
+  if(reviveOk)hudBtns.push({r:fb,fn:()=>{if(reviveAd)showRewardAd('revive',()=>useChance('cocoa'));else useChance('cocoa');}});
   hudBtns.push({r:cb,fn:()=>{if(save.chips>=3){save.chips-=3;persist();useChance('cocoa');}else sfx.full();}});
   hudBtns.push({r:[W-74,156,60,60],fn:()=>{track('chance_decline',{mission:curMission+1});loseNow();}});
+}
+function recommendUpgrade(){ // 지금 살 수 있는 것 중 승리에 가장 도움 되는 순서: 한 번에 → 샷 수 → 눈뭉치 주머니 → 구슬 주머니
+  const rows=[['ball','ballLv','한 번에',l=>BASE_BALLS+l+'개'],['shot','shotLv','샷 수',l=>BASE_SHOTS+l*SHOT_STEP+'번'],['pocket','pocketLv','눈뭉치 주머니',l=>BASE_POCKET+l+'칸'],['bag','bagLv','구슬 주머니',l=>BASE_BAG+l+'칸']];
+  for(const [k,lk,label,v] of rows){const lv=save[lk]||0;if(lv<UPG_COSTS.length&&save.chips>=UPG_COSTS[lv])return {key:k,label,now:v(lv),next:v(lv+1)};}
+  return null;
 }
 function drawResult(){
   hudBtns=[];
@@ -1152,10 +1211,14 @@ function drawResult(){
   txt(MISSION.name,0,-66,18,'#ffe066','center');
   txt(`아웃시킨 친구  ${killedTotal} / ${totalHP}`,0,-36,19,'#dfe4ff','center');
   drawChip(-52,4,13);txt(`구슬 +${chipsRun}`,6,4,26,'#7fd3ff','center');
-  txt(win?(curMission<CH1_COUNT-1&&save.cleared[curMission]?'다음 미션이 열렸어요!':'골목 대장이 됐어요!'):'구슬로 업그레이드하고 다시!',0,40,18,win?'#ffe066':'#c7cdf0','center');
-  txt(`가진 구슬 ${save.chips}개`,0,68,16,'#9aa3c8','center');
+  if(win)txt(curMission<CH1_COUNT-1&&save.cleared[curMission]?'다음 미션이 열렸어요!':'골목 대장이 됐어요!',0,40,18,'#ffe066','center');
+  else{const bl=bossG?bossG.hp:0,rec=recommendUpgrade();
+    txt(bl>0&&bossSeen?`왕눈사람 체력 ${bl} 남았어요. 아까워요!`:'조금만 더 키우면 넘어가요!',0,40,17,'#ffcf8a','center');
+    txt(rec?`추천: ${rec.label} 키우기 (${rec.now} → ${rec.next})`:'구슬을 더 모아 오면 강해져요',0,66,16,'#9fd0ff','center');}
+  if(!win&&lastSpent)txt(`도전권 -1 · 남은 ${tickets()}장`,0,92,15,'#9aa3c8','center');
+  else if(win&&!ticketProtected())txt('이겨서 도전권은 그대로!',0,92,15,'#8dff6a','center');
   if(legend&&legend.spawned){const L=LEGENDS[legend.key];
-    txt(legend.caught?`${L.zombie} 아웃! ${L.ball}`:legend.fled?`${L.zombie}은 밥 먹으러 갔어요`:`${L.zombie}을 놓쳤어요`,0,104,16,legend.caught?'#ffd23f':'#ffb86b','center');}
+    txt(legend.caught?`${L.zombie} 아웃! ${L.ball}`:legend.fled?`${L.zombie}은 밥 먹으러 갔어요`:`${L.zombie}을 놓쳤어요`,0,118,16,legend.caught?'#ffd23f':'#ffb86b','center');}
   ctx.restore();
   const b1=[W/2-156,450,150,60],b2=[W/2+6,450,150,60];
   ctx.globalAlpha=k;
@@ -1164,9 +1227,21 @@ function drawResult(){
   bigBtn(b2,nextOk?'다음 미션':'다시 하기','#ffd23f','#3a2a00',21);
   ctx.globalAlpha=1;
   if(save.teaserPending){hudBtns.push({r:b1,fn:()=>openTeaser('clear')},{r:b2,fn:()=>openTeaser('clear')});return;}
-  hudBtns.push({r:b1,fn:()=>{go('lobby');sfx.click();}},{r:b2,fn:()=>{sfx.click();if(nextOk){setMission(curMission+1);go('lobby');}else{track('rematch',{mission:curMission+1});startMission(curMission);}}});
+  hudBtns.push({r:b1,fn:()=>{go('lobby');sfx.click();}},{r:b2,fn:()=>{sfx.click();if(nextOk){setMission(curMission+1);go('lobby');}else{track('rematch',{mission:curMission+1});go('lobby');tryStart(curMission);}}});
 }
 
+function drawNoTicket(){
+  lobbyBtns=[];fullRect('rgba(8,10,25,.82)');
+  ctx.fillStyle='#2a3558';roundRect(ctx,24,170,W-48,340,22);ctx.fill();
+  txt('도전권을 다 썼어요',W/2,212,26,'#fff','center');
+  drawTickets(W/2,256,true);
+  txt(`30분마다 1장씩 차요 · 다음 1장 ${ticketWait()}`,W/2,296,16,'#c7cdf0','center');
+  txt('이기면 도전권이 줄지 않아요',W/2,322,16,'#ffe066','center');
+  const ab=[50,350,W-100,62];
+  if(adReady('ticket')){bigBtn(ab,'광고 보고 1장 받기','#ffd23f','#3a2a00',22);lobbyBtns.push({r:ab,fn:()=>showRewardAd('ticket',()=>{addTicket(1,'ad');noTicket=false;sfx.get();})});}
+  const cb=[90,430,W-180,52];bigBtn(cb,'기다릴게요','rgba(255,255,255,.14)','#fff',19);lobbyBtns.push({r:cb,fn:()=>{noTicket=false;sfx.click();}});
+  if(tickets()>0)noTicket=false;
+}
 // ================= 첫 화면 · 미션 고르기 · 준비 =================
 const TITLE_IMG=new Image();let titleImgOk=false;TITLE_IMG.onload=()=>{titleImgOk=true;};TITLE_IMG.src='./art/title.webp';
 function headerBar(title,backFn){
@@ -1232,7 +1307,8 @@ function drawMap(){
   txt('쌍둥이 왕눈사람이 내려온다',28,cy+58,16,'#ffe08a');
   txt('🔒 곧 열려요',28,cy+82,15,'#c7cdf0');
   lobbyBtns.push({r:[12,cy,W-24,ch],fn:()=>{sfx.click();if(/ch2/.test(location.hash)){setMission(CH2_TEST);go('lobby');}else openTeaser('map');}});
-  const fr=[60,650,W-120,44];txt('만든 사람에게 한마디 ›',W/2,fr[1]+22,18,'#aab3d8','center');lobbyBtns.push({r:fr,fn:()=>openFeedback('map')});
+  if(!ticketProtected()){drawTickets(W/2-62,660,false);txt(tickets()>=TICKET_MAX?'도전권 가득':`+1까지 ${ticketWait()}`,W/2+68,660,15,'#c7cdf0');}
+  const fr=[60,672,W-120,30];txt('만든 사람에게 한마디 ›',W/2,fr[1]+15,16,'#aab3d8','center');lobbyBtns.push({r:fr,fn:()=>openFeedback('map')});
 }
 // 쿠키 영상: 골목 챕터를 다 깨면 다음 무대와 더 센 보스를 살짝 보여 준다
 let teaserT=0;
@@ -1316,6 +1392,7 @@ function drawLobby(){
   rows.forEach(([key,lvk,val,unit,desc],i)=>{
     const y=314+i*64,u=UPG[key],lv=save[lvk]||0,max=u.costs.length,cost=u.costs[lv];
     ctx.fillStyle='#252b4d';roundRect(ctx,12,y,W-24,58,14);ctx.fill();
+    {const rc=recommendUpgrade();if(rc&&rc.key===key){ctx.strokeStyle=`rgba(255,210,63,${.5+.4*Math.sin(t*5)})`;ctx.lineWidth=3;roundRect(ctx,12,y,W-24,58,14);ctx.stroke();}}
     txt(u.label,24,y+19,18,'#fff');
     txt(lv>=max?`${val(lv)}${unit} (최대)`:`${val(lv)}${unit} → ${val(lv+1)}${unit}`,24+ctx.measureText(u.label).width+10,y+19,16,'#9fd0ff');
     txt(desc,24,y+42,14.5,'#9aa3c8');
@@ -1328,8 +1405,10 @@ function drawLobby(){
   for(const x of texts){ctx.save();ctx.globalAlpha=Math.min(1,x.life*2);txt(x.txt,x.x,x.y,18,x.c,'center');ctx.restore();}
   const sb=[W/2-130,582,260,64];
   bigBtn(sb,'시작!','#ffd23f','#3a2a00',28);
-  lobbyBtns.push({r:sb,fn:()=>{sfx.click();startMission(curMission);}});
-  txt('져도 모은 구슬은 가져가요',W/2,668,15,'#8a93b8','center');
+  lobbyBtns.push({r:sb,fn:()=>{sfx.click();tryStart(curMission);}});
+  if(ticketProtected())txt('첫 승리 전까지는 져도 도전권이 줄지 않아요',W/2,668,15,'#8a93b8','center');
+  else{drawTickets(W/2-60,668,false);txt(tickets()>=TICKET_MAX?'가득':`+1까지 ${ticketWait()}`,W/2+70,668,15,'#c7cdf0');}
+  if(noTicket)drawNoTicket();
 }
 
 let last=performance.now();
