@@ -302,6 +302,8 @@ const LEGENDS={
     desc:'굴러가며 커지고, 요새를 뚫고 지나감',line:'"눈은 굴려야 제맛이지."',hp:6},
 };
 const LEGEND_BASE=.15, LUCK_STEP=0, BAIT_BONUS=.45;
+const LEGEND_FROM=2; // 전설의 고수는 3번 미션(문방구)부터 — 업그레이드에 익숙해진 뒤 깜짝 등장
+const legendOpen=i=>i>=LEGEND_FROM||!!save.seenLegend;
 function legendChance(){ if(!save.seenLegend)return 1; return Math.min(.95,LEGEND_BASE+save.luckLv*LUCK_STEP+(save.bait?BAIT_BONUS:0)); }
 function chanceStars(c){return c>=.55?3:c>=.25?2:1;}
 const ITEMS={};
@@ -458,7 +460,8 @@ function startMission(i){
   killedTotal=0;totalHP=0;
   shooterX=targetX=180;bossT=0;bossFreeze=0;bagFullShown=false;lastShotWarned=false;bossG=null;bossDown=false;chanceUsed=false;slowmo=0;
   legend=null;
-  if(Math.random()<legendChance()){
+  if(!legendOpen(curMission))save.bait=false;
+  if(legendOpen(curMission)&&Math.random()<legendChance()){
     legend={key:'bowling',at:save.seenLegend?2+Math.floor(Math.random()*6):4,spawned:false,group:null,shotsLeft:3};
   }
   shotsFired=0;bossSeen=false;wave=0;buildColumn();totalHP=groups.reduce((s,g)=>s+g.hp,0);banner={txt:MISSION.name,t:0};sfx.wave();state='aim';paused=false;
@@ -616,8 +619,9 @@ function update(dt){
   if(state==='shooting'){
     const sdt=dt*ffwd;shotTime+=dt;
     if(shotTime>10&&ffwd<2.2)ffwd=2.2;
-    if(launchQ>0){launchT-=sdt;if(launchT<=0){launchT=.09;
-      const bowl=launchBowl&&launchQ===ballsPerShot; launchQ--;
+    if(launchQ>0){launchT-=sdt;if(launchT<=0){
+      const bowl=launchBowl&&launchQ===1; launchQ--;   // 대왕 눈덩이는 맨 마지막 '마무리 한 방' (첫 공이 조준선 역할)
+      launchT=(launchBowl&&launchQ===1)?.38:.09;       // 마지막 한 방 직전에 살짝 뜸
       balls.push({x:shooterX,y:FLOOR-8,vx:launchDir[0]*SPEED,vy:launchDir[1]*SPEED,trail:[],r:bowl?11:BR,bowl,tick:0,pierce:bowl?3+(save.legends.bowling||1):0});
       bowl?sfx.bowl():sfx.shoot();}}
     const steps=Math.ceil(SPEED*sdt/3),h=sdt/steps;
@@ -1081,7 +1085,7 @@ function drawHUD(){
   const iy=FLOOR+118;
   const eq=save.equipLegend&&save.legends[save.equipLegend];
   pill(8,iy-22,save.bait?200:344,44,'rgba(255,255,255,.08)');
-  if(eq){drawItemIcon('bowling',30,iy,17);txt(`${LEGENDS[save.equipLegend].ball} Lv.${eq}`,52,iy-8,16,'#ffe066');txt('샷마다 첫 공',52,iy+11,14,'#aab3d8');}
+  if(eq){drawItemIcon('bowling',30,iy,17);txt(`${LEGENDS[save.equipLegend].ball} Lv.${eq}`,52,iy-8,16,'#ffe066');txt('샷마다 마지막 한 방',52,iy+11,14,'#aab3d8');}
   else{txt('전설 공 없음',22,iy-8,16,'#9aa3c8');txt('전설의 고수를 맞히면 생겨요',22,iy+11,14,'#7c86b0');}
   if(save.bait){pill(214,iy-22,138,44,'rgba(255,210,63,.15)');drawPin(232,iy,15);txt('군고구마',250,iy-8,16,'#fff');txt('애들이 더 몰려옴',250,iy+11,13,'#ffb86b');}
   if(state==='shooting')txt(ffwd>1?'▶▶ 빨리 감는 중':'화면을 누르면 빨리 감기',W/2,FLOOR+36,16,ffwd>1?'#c0392b':'#4a5a8a','center');
@@ -1359,9 +1363,19 @@ function drawLobby(){
   const c=legendChance(),st=chanceStars(c),d=MISSION_DEFS[curMission];
   ctx.fillStyle='#3f6fc4';roundRect(ctx,12,64,W-24,74,16);ctx.fill();
   txt(`끝까지 버티고 왕눈사람(체력 ${d.boss}) 잡기`,26,86,17,'#fff');
-  txt('전설 출현',26,116,16,'#ffe066');
-  for(let k=0;k<3;k++){ctx.fillStyle=k<st?'#ffd23f':'rgba(255,255,255,.25)';star(116+k*22,116,9);}
-  txt(save.seenLegend?'눈사람 장인이 골목에 나온대':'첫 판엔 꼭 나타나요',176,116,15,'#e8eeff');
+  const LOPEN=legendOpen(curMission);
+  if(LOPEN){txt('전설 출현',26,116,16,'#ffe066');
+    for(let k=0;k<3;k++){ctx.fillStyle=k<st?'#ffd23f':'rgba(255,255,255,.25)';star(116+k*22,116,9);}
+    txt(save.seenLegend?'눈사람 장인이 골목에 나온대':'이번 판에 꼭 나타나요',176,116,15,'#e8eeff');}
+  else txt('샷이 떨어지기 전에 쓰러뜨리면 승리!',26,116,16,'#e8eeff');
+  if(!LOPEN){
+    const my=146;ctx.fillStyle='#1d2244';roundRect(ctx,12,my,W-24,132,16);ctx.fill();
+    ctx.strokeStyle='rgba(255,226,120,.35)';ctx.setLineDash([6,6]);ctx.lineWidth=2;roundRect(ctx,12,my,W-24,132,16);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='rgba(255,255,255,.08)';ctx.beginPath();ctx.arc(64,my+66,34,0,7);ctx.fill();txt('?',64,my+68,40,'#ffe08a','center');
+    txt('소문이 돌아요…',112,my+40,19,'#ffe08a');
+    txt('3번 미션부터 골목에',112,my+70,16,'#c7cdf0');
+    txt('전설의 고수가 나타난대요',112,my+94,16,'#c7cdf0');
+  } else {
   // 미끼
   const by=146;ctx.fillStyle=save.bait?'#4a3a12':'#252b4d';roundRect(ctx,12,by,W-24,62,16);ctx.fill();
   if(save.bait){ctx.strokeStyle='#ffd23f';ctx.lineWidth=3;roundRect(ctx,12,by,W-24,62,16);ctx.stroke();}
@@ -1376,12 +1390,13 @@ function drawLobby(){
   if(lv){const on=save.equipLegend==='bowling';
     if(on){ctx.strokeStyle='#8dff6a';ctx.lineWidth=3;roundRect(ctx,12,ly,W-24,62,16);ctx.stroke();}
     drawItemIcon('bowling',40,ly+31,24);txt(`대왕 눈덩이 Lv.${lv}`,66,ly+20,18,'#fff');
-    txt(`샷마다 첫 공 · ${3+lv}명까지 뚫음`,66,ly+44,14.5,'#c7cdf0');
+    txt(`샷마다 마지막 한 방 · ${3+lv}명까지 뚫음`,66,ly+44,14.5,'#c7cdf0');
     pill(W-78,ly+15,58,32,on?'#8dff6a':'#3b4270');txt(on?'장착':'해제',W-49,ly+31,16,on?'#123':'#c7cdf0','center');
     lobbyBtns.push({r:[12,ly,W-24,62],fn:()=>{save.equipLegend=on?null:'bowling';persist();sfx.click();track('legend_equip',{on:on?0:1});}});
   } else {
     ctx.globalAlpha=.5;drawItemIcon('bowling',40,ly+31,24);ctx.globalAlpha=1;
     txt('전설 공: ???',66,ly+20,18,'#9aa3c8');txt('눈사람 장인을 맞히면 얻어요',66,ly+44,14.5,'#9aa3c8');
+  }
   }
   // 업그레이드 (원작 4줄)
   txt('업그레이드 · 구슬로 키워요',16,298,17,'#ffe066');
