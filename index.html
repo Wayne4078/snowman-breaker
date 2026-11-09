@@ -1189,13 +1189,14 @@ function drawChance(){
   ctx.strokeStyle='#ffd23f';ctx.lineWidth=6;ctx.beginPath();ctx.arc(W/2,304,40,-Math.PI/2,-Math.PI/2+Math.PI*2*left/10);ctx.stroke();
   txt(Math.ceil(left),W/2,305,36,'#fff','center');
   const fb=[40,372,132,62],cb=[W-172,372,132,62];
-  const reviveAd=window.SBToss&&window.SBToss.env!=='web';const reviveOk=!reviveAd||adReady('revive');
+  const firstFree=!save.freeRevUsed; // 첫 부활 한 번은 공짜(대표 결정 2026-11-09) — 처음 손님이 1분 만에 '광고 볼래요?'부터 보지 않게
+  const reviveAd=window.SBToss&&window.SBToss.env!=='web'&&!firstFree;const reviveOk=!reviveAd||adReady('revive');
   if(reviveOk)bigBtn(fb,reviveAd?'광고 보고 부활':'무료로 부활','#2f8cff','#fff',reviveAd?18:20);
   ctx.fillStyle=save.chips>=3?'#ffd23f':'#5a5f80';roundRect(ctx,cb[0],cb[1],cb[2],cb[3],16);ctx.fill();drawChip(cb[0]+34,cb[1]+31,11);txt('×3',cb[0]+84,cb[1]+32,21,save.chips>=3?'#3a2a00':'#c7cdf0','center');
-  txt('부활은 판마다 한 번',W/2,448,15,'#8a93c0','center');
+  txt(firstFree?'처음 한 번은 무료로 드려요':'부활은 판마다 한 번',W/2,448,15,firstFree?'#ffe066':'#8a93c0','center');
   ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(W-44,186,20,0,7);ctx.fill();txt('✕',W-44,187,20,'#2a3558','center');
   ctx.restore();
-  if(reviveOk)hudBtns.push({r:fb,fn:()=>{if(reviveAd)showRewardAd('revive',()=>useChance('cocoa'));else useChance('cocoa');}});
+  if(reviveOk)hudBtns.push({r:fb,fn:()=>{if(reviveAd)showRewardAd('revive',()=>useChance('cocoa'));else{if(firstFree){save.freeRevUsed=1;persist();track('revive_free_first',{mission:curMission+1});}useChance('cocoa');}}});
   hudBtns.push({r:cb,fn:()=>{if(save.chips>=3){save.chips-=3;persist();useChance('cocoa');}else sfx.full();}});
   hudBtns.push({r:[W-74,156,60,60],fn:()=>{track('chance_decline',{mission:curMission+1});loseNow();}});
 }
