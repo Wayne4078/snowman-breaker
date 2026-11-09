@@ -20,7 +20,7 @@
 | 판 | `match_start` | mission, match_no, bait, legend_ball, *_lv, chips |
 | | `match_resume` | mission, shots_left |
 | | `boss_appear` | shots_left |
-| | `legend_spawn` / `legend_catch` / `legend_flee` | shot / lv |
+| | `legend_spawn` / `legend_catch` / `legend_flee` | shot / lv, meet(몇 번째 만남) / meet, hp_left, hp_max |
 | | `chance_offer` | reason: shots / boss |
 | | `chance_use` / `chance_decline` / `chance_timeout` | kind |
 | | `match_complete` | result(win/lose), first_clear, shots_left, shots_fired, killed, total, boss_hp_left, chips, legend(caught/fled/missed/none), chance_used, duration_s, match_no |

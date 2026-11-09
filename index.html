@@ -304,7 +304,12 @@ const LEGENDS={
 const LEGEND_BASE=.15, LUCK_STEP=0, BAIT_BONUS=.45;
 const LEGEND_FROM=2; // 전설의 고수는 3번 미션(문방구)부터 — 업그레이드에 익숙해진 뒤 깜짝 등장
 const legendOpen=i=>i>=LEGEND_FROM||!!save.seenLegend;
-function legendChance(){ if(!save.seenLegend)return 1; return Math.min(.95,LEGEND_BASE+save.luckLv*LUCK_STEP+(save.bait?BAIT_BONUS:0)); }
+// 황금 고블린 맛(대표 결정 2026-11-09): 첫 만남은 잡힐 듯 안 잡히고, 두 번째·세 번째에 잡혀 준다.
+// 처음 잡기 전까지는 자주 나오고(다시 만날 기회), 만날수록 체력이 낮아진다.
+const LEGEND_UNCAUGHT_P=.5, LEGEND_MEET_HP=[12,16,6];
+const legendMiss=k=>(save.legendMiss&&save.legendMiss[k])||0;
+function legendHp(k){return save.legends[k]?LEGENDS[k].hp:LEGEND_MEET_HP[Math.min(legendMiss(k),LEGEND_MEET_HP.length-1)];}
+function legendChance(){ if(!save.seenLegend)return 1; const base=save.legends.bowling?LEGEND_BASE:LEGEND_UNCAUGHT_P; return Math.min(.95,base+save.luckLv*LUCK_STEP+(save.bait?BAIT_BONUS:0)); }
 function chanceStars(c){return c>=.55?3:c>=.25?2:1;}
 const ITEMS={};
 const ITEM_KEYS=[];
@@ -688,10 +693,19 @@ function stepBall(b,h){
     b.dead=true;if(nextX===null)nextX=Math.max(16,Math.min(W-16,b.x));
   }
 }
+// 첫 만남: 거의 다 잡았을 때 잽싸게 도망(황금 고블린 맛) — 다음 만남부터는 잡힌다
+function legendBolt(g){
+  g.fleeing=true;g.fleeDir=g.caps[0][0]<W/2?-1:1;legend.fled=true;legend.near=true;legend.bolt=true;sfx.flee();shake=Math.max(shake,6);buzz([20,20,20]);
+  save.legendMiss=save.legendMiss||{};save.legendMiss[legend.key]=legendMiss(legend.key)+1;persist();
+  texts.push({x:g.caps[0][0],y:g.caps[0][1]-40,txt:'"앗, 잡힐 뻔했네!"',life:1.8,c:'#ffd23f',big:true});
+  texts.push({x:W/2,y:250,txt:`아깝다! ${g.hp}번만 더 맞혔으면…`,life:2.4,c:'#ffb86b',big:true});
+  track('legend_flee',{mission:curMission+1,meet:1,hp_left:g.hp,hp_max:g.max,bolt:1});totalHP-=g.hp;
+}
 function hitGroup(g,x,y,nx,ny,depth,zi){
   if(g.hp<=0)return;
   g.hp--;combo++;killedTotal++;g.flash=.09;g.squash=1;
   sfx.hit(combo);
+  if(g.legend&&legend&&legend.meet===1&&!save.legends[legend.key]&&g.hp>0&&g.hp<=Math.ceil(g.max*.2)){legendBolt(g);return;}
   if(g.boss&&g.thrower)g.thrower.dmg++;
   if(g.boss&&has('sticky')){bossFreeze=.35;g.goo=Math.min(1,g.goo+.15);}
   if(!g.boss&&g.zs.length){
@@ -729,7 +743,7 @@ function killGroup(g){
     legend.caught=true;const k=legend.key,had=save.legends[k]||0;
     save.legends[k]=had+1; if(!save.equipLegend)save.equipLegend=k; persist();
     legendFx={t:0,txt:had?`${LEGENDS[k].ball} Lv.${had+1}!`:`전설 공 획득!`,sub:had?'같은 전설을 또 잡아 레벨업':LEGENDS[k].ball+' — '+LEGENDS[k].desc,k};
-    sfx.get();buzz([30,40,60]);track('legend_catch',{mission:curMission+1,lv:save.legends[k]});
+    sfx.get();buzz([30,40,60]);track('legend_catch',{mission:curMission+1,lv:save.legends[k],meet:legend.meet||0});
     for(let i=0;i<60;i++){const a=Math.random()*6.28,s=100+Math.random()*350;parts.push({x:cx,y:cy,vx:Math.cos(a)*s,vy:Math.sin(a)*s,g:200,drag:.05,life:.8+Math.random()*.5,c:Math.random()<.5?'#ffd23f':'#fff',r:2.5,star:true});}
   }
 }
@@ -752,8 +766,13 @@ function endShot(){
   ffwd=1;shotsFired++;
   const lg=groups.find(g=>g.legend&&!g.fleeing);
   if(lg&&legend){legend.shotsLeft--;
-    if(legend.shotsLeft<=0){lg.fleeing=true;lg.fleeDir=lg.caps[0][0]<W/2?-1:1;legend.fled=true;sfx.flee();track('legend_flee',{mission:curMission+1});
-      texts.push({x:lg.caps[0][0],y:lg.caps[0][1]-40,txt:'"엄마가 밥 먹으래!"',life:1.6,c:'#ffd23f',big:true});totalHP-=lg.hp;}}
+    if(legend.shotsLeft<=0){lg.fleeing=true;lg.fleeDir=lg.caps[0][0]<W/2?-1:1;legend.fled=true;sfx.flee();
+      legend.near=lg.hp<=Math.max(2,lg.max*.4);
+      if(!save.legends[legend.key]){save.legendMiss=save.legendMiss||{};save.legendMiss[legend.key]=legendMiss(legend.key)+1;persist();}
+      track('legend_flee',{mission:curMission+1,meet:legend.meet||0,hp_left:lg.hp,hp_max:lg.max});
+      texts.push({x:lg.caps[0][0],y:lg.caps[0][1]-40,txt:'"엄마가 밥 먹으래!"',life:1.6,c:'#ffd23f',big:true});
+      if(legend.near)texts.push({x:W/2,y:250,txt:`아깝다! ${lg.hp}번만 더 맞혔으면…`,life:2.2,c:'#ffb86b',big:true});
+      totalHP-=lg.hp;}}
   if(bossDown){winNow();return;}
   const foes=groups.filter(g=>!g.legend);
   // 한 칸씩 하강
@@ -834,8 +853,9 @@ function maybeSpawnLegend(){
   for(let k=0;k<80;k++){const x=50+Math.random()*260,y=130+Math.random()*260;
     let m=1e9;for(const g of groups){const [d]=groupDist(g,x,y);m=Math.min(m,d-g.r);}
     if(m>bd){bd=m;best=[x,y];}}
-  const g=makeGroup({caps:[[best[0],best[1],best[0],best[1]]],r:26,hp:L.hp,type:'legend',legend:true});
-  g.justSpawned=true;g.born=0;groups.push(g);totalHP+=L.hp;legend.group=g;
+  const hp=legendHp(legend.key);legend.meet=legendMiss(legend.key)+1;
+  const g=makeGroup({caps:[[best[0],best[1],best[0],best[1]]],r:26,hp,type:'legend',legend:true});
+  g.justSpawned=true;g.born=0;groups.push(g);totalHP+=hp;legend.group=g;
   banner={txt:'전설의 고수 출현!',t:0,legend:true};sfx.legend();buzz([20,30,20]);shake=8;track('legend_spawn',{mission:curMission+1,shot:shotsFired});
 }
 // ================= 그리기 =================
@@ -1223,7 +1243,7 @@ function drawResult(){
   if(!win&&lastSpent)txt(`도전권 -1 · 남은 ${tickets()}장`,0,92,15,'#9aa3c8','center');
   else if(win&&!ticketProtected())txt('이겨서 도전권은 그대로!',0,92,15,'#8dff6a','center');
   if(legend&&legend.spawned){const L=LEGENDS[legend.key];
-    txt(legend.caught?`${L.zombie} 아웃! ${L.ball}`:legend.fled?`${L.zombie}은 밥 먹으러 갔어요`:`${L.zombie}을 놓쳤어요`,0,118,16,legend.caught?'#ffd23f':'#ffb86b','center');}
+    txt(legend.caught?`${L.zombie} 아웃! ${L.ball}`:legend.fled?(save.legends[legend.key]?`${L.zombie}은 밥 먹으러 갔어요`:legend.near?'눈사람 장인, 거의 잡을 뻔! 또 나와요':'눈사람 장인이 지쳐 가요. 또 나와요'):`${L.zombie}을 놓쳤어요`,0,118,16,legend.caught?'#ffd23f':'#ffb86b','center');}
   ctx.restore();
   const b1=[W/2-156,450,150,60],b2=[W/2+6,450,150,60];
   ctx.globalAlpha=k;
