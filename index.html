@@ -331,31 +331,38 @@ const ITEM_KEYS=[];
 // ================= 사운드 =================
 let ac=null;
 function audio(){ if(document.visibilityState==='hidden')return; if(!ac){ try{ac=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(ac&&ac.state==='suspended')ac.resume(); }
+// 모든 소리는 부드러운 압축기 → 전체 볼륨을 거쳐 나감: 공이 많아 소리가 겹쳐도 찢어지지 않게(대표 지적 2026-11-12 "터질 때 거칠고 커")
+let bus=null;
+function out(){ if(bus)return bus; try{const c=ac.createDynamicsCompressor();c.threshold.value=-20;c.knee.value=18;c.ratio.value=6;c.attack.value=.003;c.release.value=.18;
+  const m=ac.createGain();m.gain.value=1;c.connect(m).connect(ac.destination);bus=c;}catch(e){bus=ac.destination;} return bus; }
 function tone(f,d,type='triangle',v=.12,slide=0){
   if(!ac||save.sfxOff)return; const t=ac.currentTime,o=ac.createOscillator(),g=ac.createGain();
   o.type=type;o.frequency.setValueAtTime(f,t); if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(40,f*slide),t+d);
   g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+d);
-  o.connect(g).connect(ac.destination);o.start(t);o.stop(t+d+.02);
+  o.connect(g).connect(out());o.start(t);o.stop(t+d+.02);
 }
-function noise(d,v=.15,hp=800){
+function noise(d,v=.15,hp=800,lp=0){
   if(!ac||save.sfxOff)return; const t=ac.currentTime,b=ac.createBuffer(1,ac.sampleRate*d,ac.sampleRate),a=b.getChannelData(0);
   for(let i=0;i<a.length;i++)a[i]=(Math.random()*2-1)*(1-i/a.length);
   const s=ac.createBufferSource(),f=ac.createBiquadFilter(),g=ac.createGain();
-  f.type='highpass';f.frequency.value=hp;g.gain.value=v;s.buffer=b;s.connect(f).connect(g).connect(ac.destination);s.start(t);
+  f.type=lp?'lowpass':'highpass';f.frequency.value=lp||hp;
+  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(v,t+.006);g.gain.exponentialRampToValueAtTime(.001,t+d); // 딱 소리 없이 살짝 들어가고 빠짐
+  s.buffer=b;s.connect(f).connect(g).connect(out());s.start(t);
 }
 // 앱이 뒤로 가면 소리를 멈추고, 돌아오면 다음 손길에서 다시 켬(audio())
 document.addEventListener('visibilitychange',()=>{try{if(ac){if(document.visibilityState==='hidden')ac.suspend();}}catch(e){}});
 function setSfx(on){save.sfxOff=!on;persist();track('sound_toggle',{kind:'sfx',to:on?'on':'off'});if(on){audio();tone(700,.04,'sine',.06);}}
 const sfx={
   shoot(){tone(520,.06,'sine',.06,1.6)},
-  hit(c){const f=330*Math.pow(1.045,Math.min(c,30));tone(f,.07,'square',.045);tone(f*2,.05,'sine',.03)},
-  kill(){noise(.25,.18,600);tone(660,.12,'triangle',.1);setTimeout(()=>tone(990,.15,'triangle',.08),60)},
+  hit(c){const f=330*Math.pow(1.045,Math.min(c,30));tone(f,.07,'triangle',.05);tone(f*2,.05,'sine',.025)},
+  kill(){const now=performance.now(),dt=now-(sfx._k||0);sfx._k=now;const k=dt<90?.45:1; // 한꺼번에 여럿 터지면 작게
+    noise(.16,.07*k,0,1300);tone(520,.1,'sine',.05*k,1.25);setTimeout(()=>tone(780,.12,'sine',.035*k),45)},
   chip(){tone(880,.08,'sine',.1);setTimeout(()=>tone(1320,.12,'sine',.1),70)},
   full(){tone(300,.12,'square',.05);setTimeout(()=>tone(220,.15,'square',.05),90)},
   wave(){[523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,.18,'triangle',.09),i*90))},
   lose(){[392,330,262].forEach((f,i)=>setTimeout(()=>tone(f,.25,'triangle',.1),i*160))},
-  bowl(){noise(.08,.12,200);tone(110,.12,'sine',.15)},
-  thud(){noise(.18,.22,160);tone(90,.16,'sine',.18,.6)},
+  bowl(){noise(.08,.07,0,700);tone(110,.12,'sine',.12)},
+  thud(){noise(.16,.1,0,500);tone(90,.16,'sine',.12,.6)},
   spring(){tone(300,.15,'sine',.1,3)},
   boing(){tone(200,.2,'triangle',.08,2.2)},
   click(){tone(700,.04,'sine',.06)},
