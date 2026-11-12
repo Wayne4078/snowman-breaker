@@ -3,7 +3,9 @@
 토스 미니앱(앱인토스 WebView)용 캔버스 게임. 원작 「Zombie Breaker」(모바일 게임 속 미니게임)를 동네 눈싸움 테마로 옮긴 블롭 브릭 브레이커.
 
 - 게임 전체: `index.html` 한 파일 (인라인 스크립트, 논리 화면 360×700, 코드로 그린 그림, WebAudio 합성음)
-- 토스 연결: `src/toss.js` → `window.SBToss` (Analytics.log, closeView, backEvent → `window.SBBack`)
+- 토스 연결: `src/toss.js` → `window.SBToss` (Analytics.log, closeView, 광고, SafeArea 위쪽 여백, backEvent → `window.SBBack`)
+- **플랫폼 이음새 `PLAT`** (index.html 맨 앞): 광고·분석·닫기·위쪽 여백·결제(buy/restore)는 게임이 이것만 부른다 — 원스토어판은 PLAT만 갈아 끼움(메인 PD 공용 도구 「플랫폼 이음새」가 나오면 교체)
+- 화면 맞춤: 토스 「⋯·X」 캡슐 아래부터 판을 그림(`PLAT.topInset()` = SDK SafeArea.top). 소리: 잠깐 쉬기에 효과음 켜기/끄기(`save.sfxOff`), 배경음악은 없음, 앱이 뒤로 가면 소리 멈춤
 - 글꼴: `tools/subset_font.py`가 index.html에 나온 글자만 남긴 Jua(`public/fonts/jua-sb.woff2`)를 만든다. **글자를 새로 넣으면 빌드 전에 꼭 다시 돌릴 것.**
 - 빌드: `python3 tools/subset_font.py && npx vite build && npx ait build` → `snowman-breaker.ait`
 - 분석 이벤트 표: `ANALYTICS.md` (새 기능 = 새 이벤트 + 표 갱신)

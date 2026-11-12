@@ -1,12 +1,20 @@
 // 토스(앱인토스) 연결 — 게임 본체(index.html 인라인 스크립트)는 window.SBToss만 봅니다.
 // 토스 밖(일반 브라우저)에서도 에러 없이 조용히 넘어가야 합니다.
-import { graniteEvent, Analytics, closeView, getOperationalEnvironment, loadFullScreenAd, showFullScreenAd } from '@apps-in-toss/web-framework';
+import { graniteEvent, Analytics, closeView, getOperationalEnvironment, loadFullScreenAd, showFullScreenAd, SafeArea } from '@apps-in-toss/web-framework';
 
 let env = 'web';
 try { env = getOperationalEnvironment() || 'web'; } catch (e) { env = 'web'; }
 
+// 위쪽 여백: 토스 게임 화면 오른쪽 위 「⋯·X」 캡슐과 상태 표시줄 높이(기기마다 다름 → 숫자 박지 말고 SDK 값)
+let safeTop = 0;
+function readSafeTop() {
+  try { const v = SafeArea.get(); safeTop = v && v.top > 0 ? v.top : 0; } catch (e) { safeTop = 0; }
+}
+if (env !== 'web') readSafeTop();
+
 window.SBToss = {
   env, // 'toss' | 'sandbox' | 'web'
+  topInset() { return safeTop; },
   log(name, params) {
     if (env === 'web') return;
     try { Analytics.log({ log_name: name, log_type: 'event', params }).catch(() => {}); } catch (e) {}
@@ -42,6 +50,12 @@ window.SBToss = {
     setTimeout(() => end(rewarded), 90000); // 안전장치
   },
 };
+
+// 여백이 바뀌면(회전·캡슐 변화) 화면을 다시 맞춤
+if (env !== 'web') {
+  try { SafeArea.subscribe({ onEvent: (v) => { safeTop = v && v.top > 0 ? v.top : 0; window.SBResize && window.SBResize(); } }); } catch (e) {}
+}
+try { window.SBResize && window.SBResize(); } catch (e) {}
 
 // 위쪽 바·폰 뒤로 가기 → 게임의 '잠깐 쉬기' 규칙으로
 try {
