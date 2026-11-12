@@ -151,9 +151,10 @@ const PLAT={
   showAd(slot,done){const T=this.T();if(T){T.showAd(AD_GROUPS[slot],done);return true;}return false;},
   log(name,p){try{window.SBToss&&window.SBToss.log(name,p);}catch(e){}},
   close(){const T=this.T();if(T){T.close();return true;}return false;},
-  // 결제·구매 복원은 2번 작업(평생권)에서 채운다 — 게임은 PLAT.buy/PLAT.restore만 부르게 할 것
-  buy(sku,done){done(false,'not_ready');},
-  restore(done){done([]);},
+  // 결제: 토스는 인앱 결제, 웹 시험판은 가짜 결제(돈 안 나감) — 원스토어판은 여기만 갈아 끼움
+  canBuy(){const T=this.T();return T?!!(T.iapSupported&&T.iapSupported()):true;},
+  buy(done){const T=this.T();if(T){T.buy(LIFETIME_SKU,grantLifetime,done);return;}fakeBuy(done);},
+  restore(cb){const T=this.T();if(!T||!T.restore){cb(null);return;}T.restore(LIFETIME_SKU,grantLifetime).then(cb,()=>cb(null));},
 };
 function resize(){
   dpr=Math.min(window.devicePixelRatio||1,3);
@@ -180,6 +181,7 @@ function persist(){try{localStorage.setItem('snow_save_v2',JSON.stringify(save))
 const TICKET_MAX=5,TICKET_MS=30*60*1000;
 if(save.tickets===undefined){save.tickets=TICKET_MAX;save.ticketAt=Date.now();}
 function tickets(){
+  if(save.lifetime)return TICKET_MAX;
   const now=Date.now();
   if(save.tickets>=TICKET_MAX){save.ticketAt=now;return save.tickets;}
   const n=Math.floor((now-save.ticketAt)/TICKET_MS);
@@ -189,16 +191,59 @@ function tickets(){
 function ticketWait(){const ms=Math.max(0,save.ticketAt+TICKET_MS-Date.now()),m=Math.floor(ms/60000),sec=Math.floor(ms/1000)%60;return `${m}:${String(sec).padStart(2,'0')}`;}
 const ticketProtected=()=>!save.cleared[0];
 function spendTicket(why){
-  if(ticketProtected())return false;
+  if(ticketProtected()||save.lifetime)return false;
   tickets();if(save.tickets>=TICKET_MAX)save.ticketAt=Date.now();
   save.tickets=Math.max(0,save.tickets-1);persist();track('ticket_spend',{why,left:save.tickets});return true;
 }
 function addTicket(n,why){tickets();save.tickets=Math.min(TICKET_MAX,save.tickets+n);if(save.tickets>=TICKET_MAX)save.ticketAt=Date.now();persist();track('ticket_gain',{why,left:save.tickets});}
 function drawTickets(cx,cy,big){ // 도전권 아이콘 줄
+  if(save.lifetime){pill(cx-74,cy-(big?17:15),148,big?34:30,'rgba(255,210,63,.95)');txt('평생권 · 무제한',cx,cy+1,big?18:16,'#3a2a00','center');return;}
   const n=tickets(),sz=big?13:11,gap=big?30:25,x0=cx-gap*(TICKET_MAX-1)/2;
   for(let i=0;i<TICKET_MAX;i++){const on=i<n,x=x0+i*gap;
     ctx.fillStyle=on?'#ffffff':'rgba(255,255,255,.18)';ctx.beginPath();ctx.arc(x,cy,sz,0,7);ctx.fill();
     if(on){ctx.fillStyle='#d6303a';ctx.beginPath();ctx.ellipse(x,cy-sz*.55,sz*.75,sz*.45,0,Math.PI,0);ctx.fill();ctx.fillStyle='rgba(120,150,200,.35)';ctx.beginPath();ctx.arc(x+sz*.25,cy+sz*.25,sz*.5,0,7);ctx.fill();}}
+}
+// ================= 평생권(인앱 결제) =================
+// 「눈싸움 평생권」 4,950원(공급가 4,500) — 도전권 무제한 + 광고 없이 부활. 토스 콘솔 상품 ID(비소모품)
+const LIFETIME_SKU='ait.0000098275.434df5e1.7c22044cca.4483647131',LIFETIME_PRICE='4,950원';
+let buyBusy=null,buyMsg=null;
+// 지급: 결제 직후·밀린 주문·되살리기 모두 여기 한 곳 — 같은 주문을 두 번 받아도 문제없음
+function grantLifetime(orderId,via){
+  const fresh=!save.lifetime;
+  save.lifetime=true;save.lifetimeOrder=orderId||save.lifetimeOrder||null;persist();
+  if(fresh){track('purchase_grant',{via,sku:'lifetime'});iapLedger(orderId,via);}
+  return true;
+}
+// 우리 장부: 주문번호를 우리 서버에 한 줄(관문 ② — 손님 돈 기록은 토스 주문 내역 + 우리 장부 두 곳)
+function iapLedger(orderId,kind){
+  if(!orderId||String(orderId).startsWith('web-'))return;
+  const row={app:'snowman-breaker',build:BUILD,order_id:String(orderId).slice(0,80),sku:LIFETIME_SKU,kind:String(kind).slice(0,20),anon_id:UID.slice(0,40),platform:platform()};
+  try{fetch(SB_URL+'/rest/v1/iap_ledger',{method:'POST',keepalive:true,headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify(row)}).catch(()=>{});}catch(e){}
+}
+function buyLifetime(where){
+  if(buyBusy||save.lifetime)return;
+  buyBusy={t0:t,where};track('purchase_start',{where});
+  PLAT.buy((ok,info)=>{
+    buyBusy=null;
+    if(ok||save.lifetime){grantLifetime(info&&info.orderId,'buy');noTicket=false;sfx.get();buyMsg={t0:t,txt:'평생권을 받았어요!',sub:'이제 도전권 걱정 없이 하세요'};track('purchase_done',{where});}
+    else{buyMsg={t0:t,txt:'결제를 하지 않았어요',sub:'언제든 다시 살 수 있어요'};track('purchase_fail',{where,err:String(info&&(info.code||info.message)||info||'').slice(0,60)});}
+  });
+}
+function fakeBuy(done){setTimeout(()=>done(true,{orderId:'web-test-'+Date.now()}),1400);} // 웹 시험판: 돈 안 나감
+let restoreDone=false;
+window.SBRestore=function(why){ // 열 때 한 번: 밀린 주문 지급 + 토스 구매 내역으로 평생권 되살리기(폰을 바꿔도)
+  if(restoreDone||!window.SBToss||window.SBToss.env==='web')return;restoreDone=true;
+  PLAT.restore(r=>{
+    if(!r)return; // 조회 실패면 폰에 저장된 상태 그대로
+    if(r.owned&&!save.lifetime){grantLifetime(r.orderId,'restore');buyMsg={t0:t,txt:'평생권을 되살렸어요',sub:'도전권 무제한이에요'};}
+    else if(!r.owned&&r.refunded&&save.lifetime){save.lifetime=false;persist();track('purchase_revoked',{});}
+  });
+};
+function drawBuyOverlay(){
+  if(buyBusy){fullRect('rgba(0,0,0,.72)');txt('결제 화면을 여는 중…',W/2,330,22,'#fff','center');}
+  if(buyMsg){const k=t-buyMsg.t0;if(k>2.6){buyMsg=null;return;}const a=Math.min(1,(2.6-k)/.4);ctx.save();ctx.globalAlpha=a;
+    ctx.fillStyle='rgba(20,26,56,.95)';roundRect(ctx,30,280,W-60,110,20);ctx.fill();ctx.strokeStyle='#ffd23f';ctx.lineWidth=3;roundRect(ctx,30,280,W-60,110,20);ctx.stroke();
+    txt(buyMsg.txt,W/2,322,24,'#ffd23f','center');txt(buyMsg.sub,W/2,358,17,'#e8ecff','center');ctx.restore();}
 }
 // ================= 보상형 광고 =================
 // 토스 콘솔 광고 그룹 ID(인앱광고 약관 동의 후 발급). 비어 있으면 토스에선 광고 버튼을 숨기고, 웹 시험판에선 가짜 광고로 흐름만 확인
@@ -214,6 +259,7 @@ function showRewardAd(slot,onReward){
   adFake={t0:t,slot,done}; // 웹: 2.5초짜리 가짜 광고
 }
 function drawFakeAd(){
+  drawBuyOverlay();
   if(!adFake)return;const k=t-adFake.t0;
   fullRect('rgba(0,0,0,.88)');txt('광고 자리 (시험판)',W/2,320,24,'#fff','center');txt(`${Math.max(0,Math.ceil(2.5-k))}초 뒤 보상`,W/2,360,18,'#aab3d8','center');
   if(k>=2.5){const d=adFake.done;d(true);}
@@ -533,9 +579,9 @@ cv.addEventListener('pointerdown',e=>{
   audio();if(!guarded){guarded=true;guardBack();}
   const [x,y]=toLogic(e);
   if(!firstTouch){firstTouch=true;track('first_touch',{since_open_s:Math.round((Date.now()-T0)/1000)});}
-  if(adBusy)return;
+  if(adBusy||buyBusy)return;
   if(paused){hitBtns(pauseBtns,x,y);return;}
-  if(state==='teaser'){ if(t-teaserT>1.5){sfx.click();try{CH2_VID.pause();}catch(e){}go('map');} return; }
+  if(state==='teaser'){ if(hitBtns(teaserBtns,x,y))return; if(t-teaserT>1.5){sfx.click();try{CH2_VID.pause();}catch(e){}go('map');} return; }
   if(state==='title'||state==='map'||state==='lobby'){ hitBtns(lobbyBtns,x,y); return; }
   if(inMission()&&inRect(x,y,[0,0,60,60])){openPause('button');return;}
   if(state==='win'||state==='lose'||state==='chance'){ if(t-endT>.5)hitBtns(hudBtns,x,y); return; }
@@ -1254,7 +1300,7 @@ function drawChance(){
   txt(Math.ceil(left),W/2,305,36,'#fff','center');
   const fb=[40,372,132,62],cb=[W-172,372,132,62];
   const firstFree=!save.freeRevUsed; // 첫 부활 한 번은 공짜(대표 결정 2026-11-09) — 처음 손님이 1분 만에 '광고 볼래요?'부터 보지 않게
-  const reviveAd=PLAT.name()!=='web'&&!firstFree;const reviveOk=!reviveAd||adReady('revive');
+  const reviveAd=PLAT.name()!=='web'&&!firstFree&&!save.lifetime;const reviveOk=!reviveAd||adReady('revive');
   if(reviveOk)bigBtn(fb,reviveAd?'광고 보고 부활':'무료로 부활','#2f8cff','#fff',reviveAd?18:20);
   ctx.fillStyle=save.chips>=3?'#ffd23f':'#5a5f80';roundRect(ctx,cb[0],cb[1],cb[2],cb[3],16);ctx.fill();drawChip(cb[0]+34,cb[1]+31,11);txt('×3',cb[0]+84,cb[1]+32,21,save.chips>=3?'#3a2a00':'#c7cdf0','center');
   txt(firstFree?'처음 한 번은 무료로 드려요':'부활은 판마다 한 번',W/2,448,15,firstFree?'#ffe066':'#8a93c0','center');
@@ -1301,14 +1347,17 @@ function drawResult(){
 
 function drawNoTicket(){
   lobbyBtns=[];fullRect('rgba(8,10,25,.82)');
-  ctx.fillStyle='#2a3558';roundRect(ctx,24,170,W-48,340,22);ctx.fill();
-  txt('도전권을 다 썼어요',W/2,212,26,'#fff','center');
-  drawTickets(W/2,256,true);
-  txt(`30분마다 1장씩 차요 · 다음 1장 ${ticketWait()}`,W/2,296,16,'#c7cdf0','center');
-  txt('이기면 도전권이 줄지 않아요',W/2,322,16,'#ffe066','center');
-  const ab=[50,350,W-100,62];
-  if(adReady('ticket')){bigBtn(ab,'광고 보고 1장 받기','#ffd23f','#3a2a00',22);lobbyBtns.push({r:ab,fn:()=>showRewardAd('ticket',()=>{addTicket(1,'ad');noTicket=false;sfx.get();})});}
-  const cb=[90,430,W-180,52];bigBtn(cb,'기다릴게요','rgba(255,255,255,.14)','#fff',19);lobbyBtns.push({r:cb,fn:()=>{noTicket=false;sfx.click();}});
+  ctx.fillStyle='#2a3558';roundRect(ctx,24,140,W-48,436,22);ctx.fill();
+  txt('도전권을 다 썼어요',W/2,182,26,'#fff','center');
+  drawTickets(W/2,226,true);
+  txt(`30분마다 1장씩 차요 · 다음 1장 ${ticketWait()}`,W/2,266,16,'#c7cdf0','center');
+  txt('이기면 도전권이 줄지 않아요',W/2,292,16,'#ffe066','center');
+  // 셋 중에 고르게만(대표 2026-11-09): 평생권 / 광고 보고 1장 / 내일 다시 — 비싸다 싶으면 내일 와서 하면 됨
+  let y=320;
+  if(PLAT.canBuy()){const lb=[44,y,W-88,58];bigBtn(lb,`평생권 ${LIFETIME_PRICE} · 무제한`,'#ffd23f','#3a2a00',21);lobbyBtns.push({r:lb,fn:()=>{sfx.click();buyLifetime('no_ticket');}});
+    txt('한 번 사면 계속 · 부활도 광고 없이',W/2,y+74,15,'#c7cdf0','center');y+=96;}
+  if(adReady('ticket')){const ab=[44,y,W-88,56];bigBtn(ab,'광고 보고 1장 받기','#3f6fc4','#fff',21);lobbyBtns.push({r:ab,fn:()=>showRewardAd('ticket',()=>{addTicket(1,'ad');noTicket=false;sfx.get();})});y+=70;}
+  const cb=[80,Math.max(y,486),W-160,50];bigBtn(cb,'내일 다시 할게요','rgba(255,255,255,.14)','#fff',19);lobbyBtns.push({r:cb,fn:()=>{noTicket=false;sfx.click();track('ticket_wait',{});}});
   if(tickets()>0)noTicket=false;
 }
 // ================= 첫 화면 · 미션 고르기 · 준비 =================
@@ -1376,7 +1425,8 @@ function drawMap(){
   txt('쌍둥이 왕눈사람이 내려온다',28,cy+58,16,'#ffe08a');
   txt('🔒 곧 열려요',28,cy+82,15,'#c7cdf0');
   lobbyBtns.push({r:[12,cy,W-24,ch],fn:()=>{sfx.click();if(/ch2/.test(location.hash)){setMission(CH2_TEST);go('lobby');}else openTeaser('map');}});
-  if(!ticketProtected()){drawTickets(W/2-62,660,false);txt(tickets()>=TICKET_MAX?'도전권 가득':`+1까지 ${ticketWait()}`,W/2+68,660,15,'#c7cdf0');}
+  if(save.lifetime)drawTickets(W/2,660,false);
+  else if(!ticketProtected()){drawTickets(W/2-62,660,false);txt(tickets()>=TICKET_MAX?'도전권 가득':`+1까지 ${ticketWait()}`,W/2+68,660,15,'#c7cdf0');}
   const fr=[60,672,W-120,30];txt('만든 사람에게 한마디 ›',W/2,fr[1]+15,16,'#aab3d8','center');lobbyBtns.push({r:fr,fn:()=>openFeedback('map')});
 }
 // 쿠키 영상: 골목 챕터를 다 깨면 다음 무대와 더 센 보스를 살짝 보여 준다
@@ -1415,11 +1465,15 @@ function drawTeaser(){
     line(VS+.5,'왕눈사람이 꼬마들을 던진다!',vy+vh2+34,22,'#ffd23f');
     line(VS+1.0,'2챕터 「별똥별 언덕」 곧 열려요',vy+vh2+70,19,'#e8ecff');
   }
+  teaserBtns=[];
+  if(k>VS+1.2&&!save.lifetime&&PLAT.canBuy()){ // 골목을 다 깬 '평생 하고 싶다' 순간 — 고르게만, 밀어붙이지 않음
+    const r=[50,594,W-100,54];bigBtn(r,`평생권 ${LIFETIME_PRICE} · 도전권 무제한`,'#ffd23f','#3a2a00',19);teaserBtns.push({r,fn:()=>{sfx.click();buyLifetime('teaser');}});}
+  drawBuyOverlay();
   if(k>VS+1.2){pill(W/2-100,656,200,34,'rgba(5,8,22,.8)');const a=.6+.4*Math.sin(t*4);ctx.globalAlpha=a;txt('화면을 누르면 돌아가요',W/2,673,16,'#e8ecff','center');ctx.globalAlpha=1;}
   if(k>2.35&&k<2.45&&!teaserBoom){teaserBoom=1;sfx.legend&&sfx.legend();shake=6;}
   if(k<2.3)teaserBoom=0;
 }
-let teaserBoom=0;
+let teaserBoom=0,teaserBtns=[];
 function drawLobby(){
   lobbyBtns=[];
   fullRect('rgba(10,14,35,.8)');
@@ -1487,6 +1541,7 @@ function drawLobby(){
   bigBtn(sb,'시작!','#ffd23f','#3a2a00',28);
   lobbyBtns.push({r:sb,fn:()=>{sfx.click();tryStart(curMission);}});
   if(ticketProtected())txt('첫 승리 전까지는 져도 도전권이 줄지 않아요',W/2,668,15,'#8a93b8','center');
+  else if(save.lifetime)drawTickets(W/2,668,false);
   else{drawTickets(W/2-60,668,false);txt(tickets()>=TICKET_MAX?'가득':`+1까지 ${ticketWait()}`,W/2+70,668,15,'#c7cdf0');}
   if(noTicket)drawNoTicket();
 }
@@ -1510,6 +1565,7 @@ try{document.fonts.load('20px Jua','눈사람').then(()=>{bgCanvas=null;});}catc
   },300);
   if(PT_ON&&window.PT)PT.init({game:'snowman-breaker',build:BUILD,lang:'ko',endpoint:SB_URL,key:SB_KEY,maxPulses:3,gapMs:60000,strings:{thanks:'고마워요.',skip:'×'}});
   setTimeout(retryFb,3000);
+  setTimeout(()=>{try{window.SBRestore('boot');}catch(e){}},400);
 })();
 requestAnimationFrame(loop);
 </script>

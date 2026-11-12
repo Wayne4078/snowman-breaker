@@ -31,6 +31,7 @@
 | 도전권 | `ticket_spend` (why: lose/quit/restart, left) · `ticket_gain` (why: ad) · `ticket_empty` (mission) | |
 | 광고 | `ad_request` / `ad_reward` / `ad_fail` | slot: ticket / revive |
 | 부활 | `revive_free_first` (첫 부활 한 번은 무료) | mission |
+| 결제 | `purchase_start` / `purchase_done` / `purchase_fail` (평생권, 파는 자리) · `purchase_grant` (지급: buy·pending·restore) · `purchase_revoked` (환불돼 회수) · `ticket_wait` (도전권 없음 창에서 '내일 다시') | where: no_ticket / teaser, via, err |
 | 설정 | `sound_toggle` (잠깐 쉬기의 음악·효과음 버튼) | kind: bgm / sfx, to: on/off |
 | 예고 | `teaser_view` (2챕터 쿠키 영상) | via: clear(5번 첫 클리어) / map(잠긴 카드) |
 | 의견 | `feedback_open` / `feedback_send` / `feedback_close` | via, mood, chip, has_note / why, step |
