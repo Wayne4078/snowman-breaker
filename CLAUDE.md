@@ -10,8 +10,8 @@
 - 빌드: `python3 tools/subset_font.py && npx vite build && npx ait build` → `snowman-breaker.ait`
 - 분석 이벤트 표: `ANALYTICS.md` (새 기능 = 새 이벤트 + 표 갱신)
 
-## GitHub (2026-11-08 메인 PD 공지)
-- 대표 GitHub 계정 정지 중: 풀릴 때까지 push·PR·저장소 생성 시도 금지. 풀린 뒤에도 하루 몇 번 묶어서 사람 속도로, 자동 커밋 훅 금지.
+## GitHub·원본
+- 대표 GitHub 계정은 11/8 정지됐다가 11/10 복원. 사람 속도로만: 작은 수정마다 push 말고 하루 한두 번 묶어서, 자동 커밋 훅 금지.
 - 손님용 주소는 GitHub에 매달지 않는다(이 게임은 토스 콘솔 직접 업로드라 해당 없음).
 - 원본은 대표 Mac `~/Desktop/CLAUDE_MAIN/SNOWMAN_BREAKER/` (code/ 최신 코드, 토스번들/ .ait, _backup/ 날짜별 zip·bundle). 큰 수정이 끝날 때마다 여기도 갱신.
 
