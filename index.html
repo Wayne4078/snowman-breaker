@@ -330,7 +330,7 @@ const ITEM_KEYS=[];
 
 // ================= 사운드 =================
 let ac=null;
-function audio(){ if(document.visibilityState==='hidden')return; if(!ac){ try{ac=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(ac&&ac.state==='suspended')ac.resume(); }
+function audio(){ if(document.visibilityState==='hidden')return; if(!ac){ try{ac=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(ac&&ac.state==='suspended')ac.resume(); bgmStart(); }
 // 모든 소리는 부드러운 압축기 → 전체 볼륨을 거쳐 나감: 공이 많아 소리가 겹쳐도 찢어지지 않게(대표 지적 2026-11-12 "터질 때 거칠고 커")
 let bus=null;
 function out(){ if(bus)return bus; try{const c=ac.createDynamicsCompressor();c.threshold.value=-20;c.knee.value=18;c.ratio.value=6;c.attack.value=.003;c.release.value=.18;
@@ -351,6 +351,18 @@ function noise(d,v=.15,hp=800,lp=0){
 }
 // 앱이 뒤로 가면 소리를 멈추고, 돌아오면 다음 손길에서 다시 켬(audio())
 document.addEventListener('visibilitychange',()=>{try{if(ac){if(document.visibilityState==='hidden')ac.suspend();}}catch(e){}});
+// 배경음악: ElevenLabs로 만든 75초 곡(대표가 3개 중 1번 고름, 2026-11-12)을 끝·처음 1.5초 겹쳐 이음매 없이 돌림. 효과음보다 작게, 압축기 안 거침
+const BGM_VOL=.32;let bgmBuf=null,bgmSrc=null,bgmGain=null,bgmLoading=false;
+function bgmStart(){
+  if(!ac||save.bgmOff||bgmSrc)return;
+  if(!bgmBuf){ if(bgmLoading)return; bgmLoading=true;
+    fetch('./art/bgm_golmok.mp3').then(r=>r.arrayBuffer()).then(b=>new Promise((ok,no)=>ac.decodeAudioData(b,ok,no))).then(buf=>{bgmBuf=buf;bgmLoading=false;bgmStart();}).catch(()=>{bgmLoading=false;});
+    return; }
+  try{ bgmGain=ac.createGain();bgmGain.gain.setValueAtTime(0,ac.currentTime);bgmGain.gain.linearRampToValueAtTime(BGM_VOL,ac.currentTime+1.2);bgmGain.connect(ac.destination);
+    bgmSrc=ac.createBufferSource();bgmSrc.buffer=bgmBuf;bgmSrc.loop=true;bgmSrc.connect(bgmGain);bgmSrc.start(); }catch(e){bgmSrc=null;}
+}
+function bgmStop(){ try{ if(bgmSrc){const g=bgmGain,s0=bgmSrc;g.gain.setValueAtTime(g.gain.value,ac.currentTime);g.gain.linearRampToValueAtTime(0,ac.currentTime+.4);s0.stop(ac.currentTime+.45);} }catch(e){} bgmSrc=null; }
+function setBgm(on){save.bgmOff=!on;persist();track('sound_toggle',{kind:'bgm',to:on?'on':'off'});if(on){audio();}else bgmStop();}
 function setSfx(on){save.sfxOff=!on;persist();track('sound_toggle',{kind:'sfx',to:on?'on':'off'});if(on){audio();tone(700,.04,'sine',.06);}}
 const sfx={
   shoot(){tone(520,.06,'sine',.06,1.6)},
@@ -1151,12 +1163,14 @@ function drawPause(){
            ['미션 고르는 화면으로','#3b4270','#fff',()=>{track('pause_action',{action:'map'});quitMission('map');}],
            ['첫 화면으로','#3b4270','#fff',()=>{track('pause_action',{action:'title'});quitMission('title');}]];
   B.forEach(([l,c,tc,fn],i)=>{const r=[44,204+i*64,W-88,56];bigBtn(r,l,c,tc,i===0?24:21);pauseBtns.push({r,fn});});
-  // 소리: 토스는 앱별 소리 설정이 없어서 게임이 직접(공용 규칙). 이 게임은 배경음악이 없어 효과음 하나만
-  const on=!save.sfxOff,sr=[44,468,W-88,56];
-  ctx.fillStyle=on?'#1f6b4a':'#4a3040';roundRect(ctx,sr[0],sr[1],sr[2],sr[3],16);ctx.fill();
-  ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=2;roundRect(ctx,sr[0],sr[1],sr[2],sr[3],16);ctx.stroke();
-  txt(on?'효과음 켜짐  ·  눌러서 끄기':'효과음 꺼짐  ·  눌러서 켜기',W/2,sr[1]+sr[3]/2+1,20,'#fff','center');
-  pauseBtns.push({r:sr,fn:()=>setSfx(!!save.sfxOff)});
+  // 소리: 토스는 앱별 소리 설정이 없어서 게임이 직접(공용 규칙) — 배경음악·효과음 따로, 폰에 저장
+  const hw=(W-88-12)/2;
+  [[!save.bgmOff,'음악',()=>setBgm(!!save.bgmOff)],[!save.sfxOff,'효과음',()=>setSfx(!!save.sfxOff)]].forEach(([on,l,fn],i)=>{
+    const r=[44+i*(hw+12),468,hw,56];
+    ctx.fillStyle=on?'#1f6b4a':'#4a3040';roundRect(ctx,r[0],r[1],r[2],r[3],16);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.3)';ctx.lineWidth=2;roundRect(ctx,r[0],r[1],r[2],r[3],16);ctx.stroke();
+    txt(`${l} ${on?'켜짐':'꺼짐'}`,r[0]+r[2]/2,r[1]+r[3]/2+1,20,'#fff','center');
+    pauseBtns.push({r,fn});});
   txt('나가도 모은 구슬은 가져가요',W/2,556,15,'#8a93c0','center');
   const fr=[56,580,W-112,50];ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=2;roundRect(ctx,fr[0],fr[1],fr[2],fr[3],14);ctx.stroke();txt('만든 사람에게 한마디 ›',W/2,fr[1]+26,18,'#dfe4ff','center');pauseBtns.push({r:fr,fn:()=>openFeedback('pause')});
 }
