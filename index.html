@@ -300,7 +300,7 @@ document.addEventListener('visibilitychange',()=>{
 addEventListener('pagehide',()=>{if(!bgAt){bgAt=Date.now();track('app_background',{session_s:Math.round((Date.now()-T0)/1000),in_match:inMission()?1:0});}flushEvents();});
 // 테스트 기록(playtest-kit): 테스터 링크(?t=이름)나 ?dev 일 때만 켬 — 실제 토스 유저 기록은 토스 분석으로만
 const PT_ON=/[?&#](t=|dev\b)/.test(location.search+location.hash);
-const PT_KEYS=['screen_view','match_start','match_complete','match_abandon','chance_offer','chance_use','legend_spawn','legend_catch','upgrade_buy','feedback_send','pause_open'];
+const PT_KEYS=['screen_view','match_start','match_complete','match_abandon','chance_offer','chance_use','legend_spawn','legend_catch','upgrade_buy','feedback_send','pause_open','revive_free_first','ticket_wait','purchase_start','purchase_done','sound_toggle','teaser_view','legend_flee','ticket_empty','boss_appear','title_play','first_action'];
 
 // ================= 선배님 한마디 =================
 const SB_URL='https://api.arinplay.app/house2048',SB_KEY='sb_publishable_XSDekoMOwFTaiNcrLSvYKg_fsj-XnQs';
@@ -910,6 +910,16 @@ function finishMatch(win){
     boss_hp_left:bossG?bossG.hp:0,chips:chipsRun,legend:legend?(legend.caught?'caught':legend.fled?'fled':legend.spawned?'missed':'none'):'none',chance_used:chanceUsed?1:0,
     duration_s:Math.round((Date.now()-matchStartT)/1000),match_no:save.plays});
   if(!save.fbAsked)setTimeout(()=>{if((state==='win'||state==='lose')&&!fbOpen&&!save.fbAsked){save.fbAsked=true;persist();openFeedback('first_round');}},1600);
+  if(PT_ON&&window.PT)ptAfterMatch(win);
+}
+// 테스터 링크에서만: 결과 화면에서 짧은 순간 질문(한 판에 최대 3개, 1분 간격)
+let ptN=0;
+function ptAfterMatch(win){
+  ptN++;const ctx={mission:curMission+1,result:win?'win':'lose',n:ptN};
+  const fled=legend&&legend.fled;
+  if(fled)PT.pulse('legend_fled',{q:'전설의 고수가 도망갔을 때 기분은?',opts:['아깝다, 또 잡고 싶다','별 느낌 없다','짜증 난다'],delay:2600,ctx});
+  else if(ptN===2)PT.pulse('difficulty',{q:'방금 판, 쉬웠나요 어려웠나요?',opts:['너무 쉬웠다','딱 좋았다','조금 어려웠다','너무 어려웠다'],delay:2600,ctx});
+  else if(ptN>=4)PT.pulse('want_more',{q:'지금, 한 판 더 하고 싶나요?',opts:['더 하고 싶다','그저 그렇다','그만하고 싶다'],delay:2600,ctx});
 }
 function winNow(){sfx.wave();finishMatch(true);}
 function loseNow(){sfx.lose();finishMatch(false);}
